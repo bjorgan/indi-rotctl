@@ -2,7 +2,7 @@
 #define INDI_ROTCTL_H_DEFINED
 
 #include <inditelescope.h>
-#include <connectionplugins/connectiontcp.h>
+#include "hamlib_connection.h"
 
 /**
  * Makes rotctld pretend to be a telescope driver in INDI for tracking in e.g.
@@ -12,13 +12,6 @@ class RotctlDriver : public INDI::Telescope
 {
   public:
     RotctlDriver();
-
-    /**
-     * Called whenever any of the text fields in the client are changed.
-     * Reimplemented for snooping out rotctld hostname and port when they
-     * are set.
-     */
-    bool ISNewText(const char *dev, const char *name, char *texts[], char *names[], int n);
 
   protected:
     /**
@@ -68,29 +61,8 @@ class RotctlDriver : public INDI::Telescope
      **/
     bool updateProperties();
 
-    /**
-     * Reimplemented for ensuring connection to rotctld read socket before passing on to default INDI::Telescope connections (and rotctld write socket).
-     */
-    bool Connect();
-
-    /**
-     * Reimplemented for ensuring disconnect to rotctld read socket before passing on to normal disconnect.
-     */
-    bool Disconnect();
-
   private:
-    ///Rotctld hostname, as set in rotctld_write_connection setting fields
-    std::string rotctld_hostname;
-    ///Rotctld port, as set in rotctld_write_connection setting fields
-    std::string rotctld_port;
-
-    ///Socket for setting positions to rotctld. Need at least one working Connection
-    ///in order for the INDI::Telescope interface to work correctly.
-    Connection::TCP *rotctld_write_connection;
-    ///Socket for reading positions from rotctld.
-    ///Created as a socket and not Connection since seems to be limited to one
-    ///Connection::TCP per instance.
-    int rotctld_read_socket;
+    HamlibRotator *rotator_connection;
 
     ///Time for last call to rotctld, updated in ReadScopeStatus(). Used for
     ///calculating az, el rates

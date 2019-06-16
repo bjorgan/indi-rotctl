@@ -18,8 +18,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/indi_rotctl.xml.in ${CMAKE_CURRENT_BINARY_DIR}/indi_rotctl.xml)
 
-add_executable(indi_rotctl indi_rotctl.cpp rotctld_communication.cpp coordinate_conversion.cpp)
-target_link_libraries(indi_rotctl ${INDI_LIBRARIES} nova)
+add_executable(indi_rotctl indi_rotctl.cpp coordinate_conversion.cpp hamlib_connection.cpp)
+target_link_libraries(indi_rotctl ${INDI_LIBRARIES} nova hamlib)
 
 install(TARGETS indi_rotctl RUNTIME DESTINATION bin)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_rotctl.xml DESTINATION ${INDI_DATA_DIR})

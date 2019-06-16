@@ -5,9 +5,12 @@
 #include <memory>
 #include <indilogger.h>
 
-#include "rotctld_communication.h"
+#include <indistandardproperty.h>
+
 #include "coordinate_conversion.h"
 #include <unistd.h>
+
+#include <hamlib/rotator.h>
 
 /**
  * Boilerplate code, required for driver.
@@ -53,23 +56,18 @@ void ISSnoopDevice(XMLEle *root)
 RotctlDriver::RotctlDriver()
 {
     SetTelescopeCapability(TELESCOPE_CAN_GOTO | TELESCOPE_CAN_ABORT | TELESCOPE_HAS_LOCATION, 0);
+
     setTelescopeConnection(CONNECTION_NONE);
 }
 
 bool RotctlDriver::initProperties()
 {
-    //disable default connections, to be replaced by rotctld write connection
-    //below
-    setTelescopeConnection(CONNECTION_NONE);
     INDI::Telescope::initProperties();
 
-    //create connection against rotctld: this will be the write stream.  can
-    //only create one Connection, read stream is therefore created in a
-    //different way in Connect(), but also need at least one Connection in
-    //order for INDI::Telescope to work properly.  This also defines host and
-    //port GUI fields for us.
-    rotctld_write_connection = new Connection::TCP(this);
-    INDI::DefaultDevice::registerConnection(rotctld_write_connection);
+    //set active connection to custom connection wrapped around hamlib rotator.
+    //(INDI interface won't work without a valid active Connection instance.)
+    rotator_connection = new HamlibRotator(this);
+    INDI::DefaultDevice::registerConnection(rotator_connection);
 
     return true;
 }
@@ -84,41 +82,6 @@ const char *RotctlDriver::getDefaultName()
     return "Rotctld interface";
 }
 
-bool RotctlDriver::Connect()
-{
-    //do other necessary connection stuff and connect to rotctld for
-    //independent writing (uses Connection::TCP interface for connection)
-    bool connection_success = INDI::Telescope::Connect();
-
-    //connect to rotctld for independent reading (direct socket creation)
-    rotctld_read_socket = rotctld_connect(rotctld_hostname.c_str(), rotctld_port.c_str());
-    if (rotctld_read_socket == -1) {
-        LOG_ERROR("Failed to connect rotctld read socket\n");
-        connection_success = false;
-    }
-    return connection_success;
-
-}
-
-bool RotctlDriver::ISNewText(const char *dev, const char *name, char *texts[], char *names[], int n)
-{
-    //unable to get port from Connection::TCP::port() (I got only zero, bug?):
-    //Need to snoop out rotctld address and port information every time it is
-    //set before it gets propagated to the Connection instance.
-    if (std::string(name) == std::string("DEVICE_ADDRESS")) {
-        rotctld_hostname = std::string(texts[0]);
-        rotctld_port = std::string(texts[1]);
-    }
-
-    return INDI::Telescope::ISNewText(dev, name, texts, names, n);
-}
-
-bool RotctlDriver::Disconnect()
-{
-    close(rotctld_read_socket);
-    return INDI::Telescope::Disconnect();
-}
-
 bool RotctlDriver::Goto(double ra, double dec)
 {
     //lock onto new RA, DEC
@@ -127,7 +90,7 @@ bool RotctlDriver::Goto(double ra, double dec)
 
     //start motion
     indi_ra_dec_to_hamlib_az_el(observer, ra, dec, &target_azimuth, &target_elevation);
-    rotctld_set_position(rotctld_write_connection->getPortFD(), target_azimuth, target_elevation);
+    rot_set_position(rotator_connection->getRotator(), target_azimuth, target_elevation);
 
     //mark state as slewing
     TrackState = SCOPE_SLEWING;
@@ -136,7 +99,7 @@ bool RotctlDriver::Goto(double ra, double dec)
 
 bool RotctlDriver::Abort()
 {
-    rotctld_stop(rotctld_write_connection->getPortFD());
+    rot_stop(rotator_connection->getRotator());
     TrackState = SCOPE_IDLE;
     return true;
 }
@@ -151,7 +114,7 @@ bool RotctlDriver::ReadScopeStatus()
     //get current az, el position and RA, DEC from hamlib
     float last_azimuth = current_azimuth;
     float last_elevation = current_elevation;
-    rotctld_get_position(rotctld_read_socket, &current_azimuth, &current_elevation);
+    rot_get_position(rotator_connection->getRotator(), &current_azimuth, &current_elevation);
     hamlib_az_el_to_indi_ra_dec(observer, current_azimuth, current_elevation, &current_ra, &current_dec);
 
     //calculate elevation and azimuth change rates
@@ -175,7 +138,7 @@ bool RotctlDriver::ReadScopeStatus()
             //achievable accuracy.
             if ((fabs(target_dec - current_dec) > 0) || (fabs(target_ra - current_ra) > 0)) {
                 indi_ra_dec_to_hamlib_az_el(observer, target_ra, target_dec, &target_azimuth, &target_elevation);
-                rotctld_set_position(rotctld_write_connection->getPortFD(), target_azimuth, target_elevation);
+                rot_set_position(rotator_connection->getRotator(), target_azimuth, target_elevation);
                 TrackState = SCOPE_SLEWING;
             }
             break;
